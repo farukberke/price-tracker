@@ -6,6 +6,8 @@ Fetch the product page, pull the price out of the JSON that is already embedded 
 store it, and alert on change. One dependency. Each check is a single ~200 ms HTTPS request, not a
 300 MB Chromium.
 
+![npm run demo: fetches a live Trendyol price with no browser, detects a price drop, and prints the exact alert that would go to Telegram or Google Sheets](docs/demo.png)
+
 ## The one thing worth reading first: `fetch()` vs `node:https`
 
 The obvious way to fetch a page in modern Node is `fetch()`. Against Trendyol, it does not work —
