@@ -4,7 +4,7 @@ const path = require("path");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { checkOne, watchOnce, formatChange, notifyChange, loadConfig } = require("../src/watch");
+const { checkOne, watchOnce, formatChange, changeRow, makeOnChange, loadConfig } = require("../src/watch");
 const { openDatabase, recordPrice, lastPrice } = require("../src/db");
 
 const URL = "https://www.trendyol.com/alice/x-p-33491694";
@@ -81,31 +81,71 @@ test("formatChange renders a price drop with an arrow and signed delta", () => {
   assert.match(line, /-80/);
 });
 
-test("notifyChange sends the change text and the product url", async () => {
+const dropChange = { price: { old: 1379, new: 1299, delta: -80, direction: "down" }, stock: null };
+const dropProduct = { id: "1", name: "Kedi Maması", url: "https://www.trendyol.com/x-p-1", currency: "TRY", inStock: true };
+
+test("makeOnChange sends the change text and url to the Telegram sink", async () => {
   let sent = null;
-  await notifyChange(
-    { name: "Kedi Maması", url: "https://www.trendyol.com/x-p-1", currency: "TRY" },
-    { price: { old: 1379, new: 1299, delta: -80, direction: "down" }, stock: null },
-    silent,
-    async (text) => { sent = text; }
-  );
+  const onChange = makeOnChange({ telegram: true, sheet: false, sendImpl: async (t) => { sent = t; } });
+  await onChange(dropProduct, dropChange, silent);
+
   assert.match(sent, /Kedi Maması/);
   assert.match(sent, /1379 → 1299/);
   assert.match(sent, /trendyol\.com\/x-p-1/);
 });
 
-test("notifyChange never throws when the send fails — the change was already recorded", async () => {
+test("makeOnChange appends a row to the Sheets sink", async () => {
+  let row = null;
+  const onChange = makeOnChange({ telegram: false, sheet: true, appendImpl: async (r) => { row = r; } });
+  await onChange(dropProduct, dropChange, silent);
+
+  assert.ok(Array.isArray(row));
+  assert.equal(row[1], "1");            // product id
+  assert.equal(row[5], 1379);           // old price
+  assert.equal(row[6], 1299);           // new price
+  assert.equal(row[7], -80);            // delta
+});
+
+test("a sink failure is swallowed and logged — one channel never sinks the pass", async () => {
   let errored = "";
   const log = { log() {}, error: (m) => { errored = m; } };
-  // Must not reject even though the sender blows up.
-  await notifyChange(
-    { name: "x", url: "u", currency: "TRY" },
-    { price: { old: 2, new: 1, delta: -1, direction: "down" }, stock: null },
-    log,
-    async () => { throw new Error("chat not found"); }
-  );
-  assert.match(errored, /notify failed/);
+  const onChange = makeOnChange({
+    telegram: true,
+    sheet: true,
+    sendImpl: async () => { throw new Error("chat not found"); },
+    appendImpl: async () => {}, // sheet still succeeds
+  });
+
+  // Must not reject even though the Telegram sink blows up.
+  await onChange(dropProduct, dropChange, log);
+  assert.match(errored, /telegram sink failed/);
   assert.match(errored, /chat not found/);
+});
+
+test("makeOnChange with no channels only logs to the console", async () => {
+  let logged = "";
+  let sent = false;
+  const log = { log: (m) => { logged = m; }, error() {} };
+  const onChange = makeOnChange({
+    telegram: false,
+    sheet: false,
+    sendImpl: async () => { sent = true; },
+  });
+  await onChange(dropProduct, dropChange, log);
+
+  assert.match(logged, /CHANGE/);
+  assert.equal(sent, false, "no send when Telegram is not configured");
+});
+
+test("changeRow records new price and blanks the old one on a first sighting", () => {
+  // A first-seen product has no price change block; the row should still carry the current price.
+  const row = changeRow({ id: "9", name: "n", url: "u", currency: "TRY", price: 500, inStock: false }, {
+    price: null,
+    stock: null,
+  });
+  assert.equal(row[5], "");             // no old price
+  assert.equal(row[6], 500);            // current price still recorded
+  assert.equal(row[8], "out of stock");
 });
 
 test("loadConfig throws a helpful error when the file is missing", () => {

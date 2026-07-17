@@ -3,7 +3,8 @@ const path = require("path");
 const { fetchProduct, ParseError } = require("./sites/trendyol");
 const { openDatabase, recordPrice, lastPrice } = require("./db");
 const { detectChange } = require("./changes");
-const { sendMessage, isConfigured } = require("./notify");
+const notify = require("./notify");
+const sheets = require("./sheets");
 
 // The loop that ties the pieces together: fetch each product, compare against the last stored
 // price, record the new one, and hand any change to a callback.
@@ -81,21 +82,61 @@ async function watch(db, urls, opts = {}) {
   return control;
 }
 
-// Default onChange: a human-readable line. Same text a notifier would send.
+// A change fans out to one or more sinks: the console (always), and Telegram / Sheets when they are
+// configured. makeOnChange builds the onChange the loop calls, wiring in only the sinks that are set
+// up so `npm run watch` is useful with an empty .env and lights up more channels as they fill in.
+//
+// Every sink is wrapped so its failure is logged and swallowed, never rethrown: the change is
+// already recorded, and losing one alert must not abort the pass or block the other sinks.
+function makeOnChange(opts = {}) {
+  const {
+    telegram = notify.isConfigured(),
+    sheet = sheets.isConfigured(),
+    sendImpl = notify.sendMessage,
+    appendImpl = sheets.appendRow,
+  } = opts;
+
+  return async function onChange(product, change, log = console) {
+    logChange(product, change, log); // console is not optional — it is the base record of the run
+
+    if (telegram) {
+      await runSink("telegram", log, () =>
+        sendImpl(`${formatChange(product, change)}\n${product.url}`)
+      );
+    }
+    if (sheet) {
+      await runSink("sheets", log, () => appendImpl(changeRow(product, change)));
+    }
+  };
+}
+
+async function runSink(name, log, fn) {
+  try {
+    await fn();
+  } catch (err) {
+    log.error(`[watch] ${name} sink failed (change was still recorded): ${err.message}`);
+  }
+}
+
+// Default onChange when nothing is configured: just the console line.
 function logChange(product, change, log = console) {
   log.log(`[watch] CHANGE: ${formatChange(product, change)}`);
 }
 
-// onChange that also pushes the change to Telegram. Always logs first, then sends. A failed send
-// must not sink the pass — the change is already stored, and losing an alert is bad but silently
-// aborting the run over it is worse. So the send is caught and logged, never rethrown.
-async function notifyChange(product, change, log = console, sendImpl = sendMessage) {
-  logChange(product, change, log);
-  try {
-    await sendImpl(`${formatChange(product, change)}\n${product.url}`);
-  } catch (err) {
-    log.error(`[watch] notify failed (change was still recorded): ${err.message}`);
-  }
+// One change as a spreadsheet row. Columns: when, id, name, url, currency, old, new, delta, stock.
+// Kept here (not in sheets.js) so the Sheets sink stays agnostic about what a change looks like.
+function changeRow(product, change) {
+  return [
+    new Date().toISOString(),
+    product.id,
+    product.name,
+    product.url,
+    product.currency,
+    change.price ? change.price.old : "",
+    change.price ? change.price.new : product.price,
+    change.price ? change.price.delta : "",
+    product.inStock ? "in stock" : "out of stock",
+  ];
 }
 
 function formatChange(product, change) {
@@ -132,13 +173,14 @@ async function main() {
   const config = loadConfig();
   const db = openDatabase();
 
-  // Send to Telegram only if it is set up; otherwise the console log is the whole alert. This keeps
-  // `npm run watch` useful with zero configuration and lets a notifier light up just by filling .env.
-  const onChange = isConfigured() ? notifyChange : logChange;
-  const via = isConfigured() ? "Telegram + console" : "console (Telegram not configured)";
+  // Fan out to whatever is configured; the console line is always there.
+  const onChange = makeOnChange();
+  const channels = ["console"];
+  if (notify.isConfigured()) channels.push("Telegram");
+  if (sheets.isConfigured()) channels.push("Sheets");
   console.log(
     `[watch] watching ${config.urls.length} product(s), every ` +
-      `${(config.intervalMs ?? DEFAULTS.intervalMs) / 60000} min — alerts via ${via}`
+      `${(config.intervalMs ?? DEFAULTS.intervalMs) / 60000} min — alerts via ${channels.join(", ")}`
   );
 
   const stop = (sig) => {
@@ -162,4 +204,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { checkOne, watchOnce, watch, formatChange, notifyChange, loadConfig };
+module.exports = { checkOne, watchOnce, watch, formatChange, changeRow, makeOnChange, loadConfig };
