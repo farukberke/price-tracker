@@ -114,6 +114,7 @@ cp products.example.json products.json
 Then:
 
 ```bash
+npm run demo          # live end-to-end: fetch a real price -> detect a change -> show the alert
 npm run watch         # loop over products.json, alert on change
 npm run check:live    # one deliberate live request (see "Testing")
 npm test              # 42 tests, never touches the network
