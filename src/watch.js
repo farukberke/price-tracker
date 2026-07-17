@@ -3,6 +3,7 @@ const path = require("path");
 const { fetchProduct, ParseError } = require("./sites/trendyol");
 const { openDatabase, recordPrice, lastPrice } = require("./db");
 const { detectChange } = require("./changes");
+const { sendMessage, isConfigured } = require("./notify");
 
 // The loop that ties the pieces together: fetch each product, compare against the last stored
 // price, record the new one, and hand any change to a callback.
@@ -46,7 +47,8 @@ async function checkOne(db, url, { fetchImpl, onChange = logChange, log = consol
   const change = detectChange(previous, product);
   recordPrice(db, product);
 
-  if (change.changed) onChange(product, change, log);
+  // Awaited so an async notifier's failure lands in a try/caught place, not an unhandled rejection.
+  if (change.changed) await onChange(product, change, log);
   else if (change.firstSeen) {
     log.log(`[watch] first check: ${product.name} — ${product.priceText ?? product.price}`);
   }
@@ -79,9 +81,21 @@ async function watch(db, urls, opts = {}) {
   return control;
 }
 
-// Default onChange: a human-readable line. Same text a notifier would send later.
+// Default onChange: a human-readable line. Same text a notifier would send.
 function logChange(product, change, log = console) {
   log.log(`[watch] CHANGE: ${formatChange(product, change)}`);
+}
+
+// onChange that also pushes the change to Telegram. Always logs first, then sends. A failed send
+// must not sink the pass — the change is already stored, and losing an alert is bad but silently
+// aborting the run over it is worse. So the send is caught and logged, never rethrown.
+async function notifyChange(product, change, log = console, sendImpl = sendMessage) {
+  logChange(product, change, log);
+  try {
+    await sendImpl(`${formatChange(product, change)}\n${product.url}`);
+  } catch (err) {
+    log.error(`[watch] notify failed (change was still recorded): ${err.message}`);
+  }
 }
 
 function formatChange(product, change) {
@@ -117,7 +131,15 @@ function loadConfig(configPath = path.join(__dirname, "..", "products.json")) {
 async function main() {
   const config = loadConfig();
   const db = openDatabase();
-  console.log(`[watch] watching ${config.urls.length} product(s), every ${(config.intervalMs ?? DEFAULTS.intervalMs) / 60000} min`);
+
+  // Send to Telegram only if it is set up; otherwise the console log is the whole alert. This keeps
+  // `npm run watch` useful with zero configuration and lets a notifier light up just by filling .env.
+  const onChange = isConfigured() ? notifyChange : logChange;
+  const via = isConfigured() ? "Telegram + console" : "console (Telegram not configured)";
+  console.log(
+    `[watch] watching ${config.urls.length} product(s), every ` +
+      `${(config.intervalMs ?? DEFAULTS.intervalMs) / 60000} min — alerts via ${via}`
+  );
 
   const stop = (sig) => {
     console.log(`\n[watch] ${sig} — stopping after current pass.`);
@@ -129,6 +151,7 @@ async function main() {
   await watch(db, config.urls, {
     intervalMs: config.intervalMs,
     delayBetweenMs: config.delayBetweenMs,
+    onChange,
   });
 }
 
@@ -139,4 +162,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { checkOne, watchOnce, watch, formatChange, loadConfig };
+module.exports = { checkOne, watchOnce, watch, formatChange, notifyChange, loadConfig };

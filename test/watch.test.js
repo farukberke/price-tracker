@@ -4,7 +4,7 @@ const path = require("path");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { checkOne, watchOnce, formatChange, loadConfig } = require("../src/watch");
+const { checkOne, watchOnce, formatChange, notifyChange, loadConfig } = require("../src/watch");
 const { openDatabase, recordPrice, lastPrice } = require("../src/db");
 
 const URL = "https://www.trendyol.com/alice/x-p-33491694";
@@ -79,6 +79,33 @@ test("formatChange renders a price drop with an arrow and signed delta", () => {
   assert.match(line, /↓/);
   assert.match(line, /1379 → 1299/);
   assert.match(line, /-80/);
+});
+
+test("notifyChange sends the change text and the product url", async () => {
+  let sent = null;
+  await notifyChange(
+    { name: "Kedi Maması", url: "https://www.trendyol.com/x-p-1", currency: "TRY" },
+    { price: { old: 1379, new: 1299, delta: -80, direction: "down" }, stock: null },
+    silent,
+    async (text) => { sent = text; }
+  );
+  assert.match(sent, /Kedi Maması/);
+  assert.match(sent, /1379 → 1299/);
+  assert.match(sent, /trendyol\.com\/x-p-1/);
+});
+
+test("notifyChange never throws when the send fails — the change was already recorded", async () => {
+  let errored = "";
+  const log = { log() {}, error: (m) => { errored = m; } };
+  // Must not reject even though the sender blows up.
+  await notifyChange(
+    { name: "x", url: "u", currency: "TRY" },
+    { price: { old: 2, new: 1, delta: -1, direction: "down" }, stock: null },
+    log,
+    async () => { throw new Error("chat not found"); }
+  );
+  assert.match(errored, /notify failed/);
+  assert.match(errored, /chat not found/);
 });
 
 test("loadConfig throws a helpful error when the file is missing", () => {
