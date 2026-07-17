@@ -2,6 +2,8 @@ node_modules/
 .env
 credentials/
 data/
+# Internal dev notes (agent context, roadmap, commercial plan pointer) — kept local, not published.
+CLAUDE.md
 # The real watch list is personal (which products this user tracks). Only the example is committed.
 products.json
 *.log
