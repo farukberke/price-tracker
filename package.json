@@ -1,0 +1,24 @@
+{
+  "name": "price-tracker",
+  "version": "0.1.0",
+  "description": "Tracks e-commerce prices without a headless browser: fetch, parse embedded JSON, alert on change.",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test",
+    "check:live": "node scripts/check-live.js",
+    "watch": "node src/watch.js"
+  },
+  "keywords": [
+    "web-scraping",
+    "price-tracking",
+    "price-monitoring",
+    "e-commerce",
+    "trendyol",
+    "nodejs"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  }
+}

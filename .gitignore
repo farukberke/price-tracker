@@ -1,0 +1,18 @@
+node_modules/
+.env
+credentials/
+data/
+# The real watch list is personal (which products this user tracks). Only the example is committed.
+products.json
+*.log
+
+# Screenshots / raw recordings: a screen capture frames real names and phone numbers even when
+# the code is clean. Anything under docs/ is part of the documentation and is exempt.
+*.png
+*.jpg
+*.jpeg
+*.gif
+!docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.jpeg
+!docs/**/*.gif
