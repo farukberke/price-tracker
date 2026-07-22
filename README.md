@@ -1,12 +1,48 @@
 # price-tracker
 
+**Tarayıcı açmadan e-ticaret fiyatlarını takip eder; fiyat değişince haber verir.**
+Ürün sayfasını indirir, fiyatı HTML'in içinde zaten gömülü duran JSON'dan okur,
+kaydeder ve değişimde uyarı gönderir (Telegram, Google Sheets veya konsol).
+Her kontrol tek bir ~200 ms'lik HTTPS isteği — 300 MB'lık Chromium değil.
+
+![npm run demo: canlı bir Trendyol fiyatını tarayıcısız çeker, fiyat düşüşünü yakalar ve Telegram'a gidecek uyarının aynısını yazdırır](docs/demo.png)
+
+`Node.js 22+` · `node:sqlite` · **tek bağımlılık** · **42 test, hiçbiri ağa çıkmaz**
+
+### İlginç olan kısım fiyat takibi değil
+
+Bir sayfadan fiyat çekmek kolay. Asıl iş, bot korumasının neden 403 verdiğini
+doğru teşhis etmek ve yanlış fiyatı sessizce raporlamamak:
+
+- **`fetch()` 403 alıyor, `node:https` 200 alıyor.** Aynı URL, aynı başlıklar,
+  aynı IP, aynı saniye. Sebep TLS parmak izi ya da IP engeli değil: `fetch()`
+  undici üzerinde çalışıyor ve HTTP başlıklarının **sırasını değiştiriyor**.
+  Akamai tarzı korumalar bu sırayı parmak izi olarak kullanıyor. 403'ü
+  "demek ki tarayıcı gerek" diye okumak pahalı bir yanlış teşhis — sonu
+  Puppeteer ve saniyeler süren kontroller. Doğru çözüm tek satırlık `node:https`.
+- **Fiyat regex'le değil, JSON ayrıştırılarak alınıyor.** Bir ürün sayfasında
+  onlarca fiyat görünümlü metin var: liste fiyatı, taksit, benzer ürünler,
+  reklamlar. Regex bunlardan birini seçer ve sayfa değiştiği gün **sessizce
+  yanlış sayıyı** raporlamaya başlar. Burada beklenen alan yoksa `ParseError`
+  fırlatılıyor — gürültülü hata, sessiz yanlıştan iyidir.
+- **İlk çalıştırma asla "değişiklik" değildir.** Karşılaştıracak eski fiyat
+  yokken uyarı üreten bir takipçi her yeni üründe yanlış alarm verir ve
+  susturulur.
+- **Testler ağa çıkmaz.** Canlı siteyi test eden bir paket, fiyat değiştiğinde
+  ve uçakta çalışmaz. Kayıtlı sayfalarla çalışıyor; şema değişti mi sorusunu
+  ayrı bir komut (`npm run check:live`) cevaplıyor.
+
+Aşağıdaki İngilizce bölüm bunların tamamını kodla birlikte anlatıyor.
+
+---
+
+## English
+
 Tracks e-commerce prices and tells you when they move — without a headless browser.
 
 Fetch the product page, pull the price out of the JSON that is already embedded in the HTML,
 store it, and alert on change. One dependency. Each check is a single ~200 ms HTTPS request, not a
 300 MB Chromium.
-
-![npm run demo: fetches a live Trendyol price with no browser, detects a price drop, and prints the exact alert that would go to Telegram or Google Sheets](docs/demo.png)
 
 ## The one thing worth reading first: `fetch()` vs `node:https`
 
